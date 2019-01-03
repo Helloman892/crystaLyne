@@ -1,0 +1,13 @@
+name: ly_interpreter
+version: 0.1.0
+
+authors:
+  - Helloman892 <1565516+Helloman892@users.noreply.github.com>
+
+targets:
+  ly_interpreter:
+    main: src/ly_interpreter.cr
+
+crystal: 0.27.0
+
+license: MIT
