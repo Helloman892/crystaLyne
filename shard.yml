@@ -1,5 +1,5 @@
 name: ly_interpreter
-version: 0.1.0
+version: 0.9.0
 
 authors:
   - Helloman892 <1565516+Helloman892@users.noreply.github.com>
@@ -9,5 +9,10 @@ targets:
     main: src/ly_interpreter.cr
 
 crystal: 0.27.0
+
+dependencies:
+  spec2:
+    github: waterlink/spec2.cr
+    version: ~> 0.9
 
 license: MIT

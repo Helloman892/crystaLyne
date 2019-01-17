@@ -256,7 +256,7 @@ module Ly
         end
 
         debug char, current_stack, input_stack, reader
-        # TODO: macros
+
         {% begin %}
           case char
           {% for io in ['i', 'n', 'o', 'u'] %}
@@ -283,30 +283,31 @@ module Ly
             when '+' then current_stack.stack_plus
             when 'o' then current_stack.stack_o input_stack
             when 'u' then current_stack.stack_u input_stack
-            when 'n' then current_stack.stack_n
-            when 'p' then current_stack.stack_p
-            when 's' then current_stack.stack_s
+            {% for c in ['n', 'p', 's'] %}
+              when {{c}} then current_stack.stack_{{c.id}}
+            {% end %}
             end
           when '0'..'9' then current_stack.push char.to_i32
           when '(' # multi-digit numbers
             _pos = reader.pos
             begin
               reader.next_char
-              to_push = reader.take_while &.!= ')'
-            rescue
+              current_stack.push (reader.take_while &.!= ')').join.to_big_i
+            rescue ArgumentError
               raise LyError.new "Unclosed ( at position #{_pos}"
             end
-            current_stack.push to_push.join.to_big_i
           when '>'  then shift :right
           when '<'  then shift :left
           when '\'' then current_stack.push reader.next_char.ord
           when ';'  then raise LyStop.new
           when '"'
             _pos = reader.pos
-            reader.next_char
-            reader.take_while do |c|
-              break if c == '"'
-              current_stack.push c.ord
+            begin
+              reader.next_char
+              reader.take_while do |c|
+                break if c == '"'
+                current_stack.push c.ord
+              end
             rescue IndexError
               raise LyError.new %(Unclosed " at position #{_pos})
             end
@@ -340,12 +341,12 @@ module Ly
             end
           when '$'
             current_pos = reader.pos
-            (current_stack.new_pop implicit: false).times do |i|
+            (k = current_stack.new_pop implicit: false).times do |i|
               until reader.next_char == ']'
                 next
               end
             rescue IndexError
-              raise LyError.new "$ at position #{current_pos} breaks too many loops (#{i})"
+              raise LyError.new "$ at position #{current_pos} breaks too many loops (#{k - i})"
             end
           else
             if reader.peek_next_char == '{'
