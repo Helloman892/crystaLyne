@@ -1,16 +1,23 @@
 # Execution is guaranteed to be O(n + k) on the input program length where k := the total characters in called functions
 require "big"
+require "option_parser"
 
 module Ly
-  class LyStack < Array(BigInt | BigFloat)
-    @@backup_cell = Array(BigInt | BigFloat).new 20
+  extend self
+
+  class LyStack < Array(BigInt)
+    class_getter backup_cell = Array(BigInt).new 20
     @@implicit = true
 
     def self.implicit=(value)
       @@implicit = value
     end
 
-    def initialize
+    def push(value : Int32)
+      push BigInt.new value
+    end
+
+    def initialize(@debug : Bool = false)
       initialize 20
     end
 
@@ -21,24 +28,19 @@ module Ly
     def new_pop(*, implicit = @@implicit)
       pop do
         raise EmptyStackError.new "Cannot pop from an empty stack" unless implicit
-        (input = gets) ? input.to_big_i { raise InputError.new } : 0
+        (input = gets) ? input.to_big_i : BigInt.new 0
+      rescue ArgumentError
+        raise InputError.new
       end
     end
 
     # +, -, *, /, %
     {% for op in {:+, :-, :*, :/, :%} %}
       def {{op.id}}
-        y, x = new_pop, new_pop
-        {% if op == :/ %}
-          begin
-            result = y.to_big_f / x
-          rescue DivisionByZeroError
-            raise LyError.new "Division by zero (current stack: #{self})"
-          end
-        {% else %}
-          result = y {{op.id}} x
-        {% end %}
-        push result
+        x, y = new_pop, new_pop
+        push y {{op.id}} x
+      rescue DivisionByZeroError
+        raise LyError.new "Division by zero (current stack: #{self})"
       end
     {% end %}
 
@@ -96,26 +98,28 @@ module Ly
 
     # o, u (o prints the UTF-8 character with the codepoint on the top of the stack)
     def o(input_stack) : Nil
-      _output(input_stack) { |temp| puts temp.chr }
+      _output(input_stack) { |temp| STDOUT << temp.to_s.to_i64.chr }
     end
 
     def u(input_stack) : Nil
-      _output(input_stack) { |temp| puts temp }
+      _output(input_stack) { |temp| STDOUT << temp }
     end
 
     private def _output(input_stack, &block)
+      STDOUT << "outputted: " if @debug
       temp = new_pop implicit: false
       input_stack ? input_stack << temp : yield temp
+      STDOUT << '\n' if @debug
     end
 
     def i(input_stack) : Nil
-      input_stack || return push input_stack.new_pop implicit: false
+      input_stack && return push input_stack.new_pop implicit: false
       (input = gets) || raise InputError.new "Required input not provided"
-      input.each_codepoint { |c| push c }
+      input.each_codepoint { |c| push BigInt.new c }
     end
 
     def n(input_stack) : Nil
-      input_stack || return push input_stack.new_pop implicit: false
+      input_stack && return push input_stack.new_pop implicit: false
       (input = gets) || raise InputError.new "Required input not provided"
       push input.to_big_i
     rescue ArgumentError
@@ -127,9 +131,6 @@ module Ly
       x, y = new_pop, new_pop
       push Random.new.rand y..x
     end
-
-    # TODO TODO TODO TODO TODO
-    # make sure implementation matches ly.py
 
     # G, L
     #
@@ -162,7 +163,7 @@ module Ly
     # R
     def uR : Nil
       x, y = new_pop, new_pop
-      @internal += y..x.to_a
+      concat y..x
     end
 
     # `
@@ -199,15 +200,20 @@ module Ly
     end
 
     # &o
-    def stack_o : Nil
-      puts (map &.chr).join
-      clear
+    def stack_o(input_stack) : Nil
+      r
+      while size > 0
+        o input_stack
+      end
     end
 
     # &u
-    def stack_u : Nil
-      puts join " "
-      clear
+    def stack_u(input_stack) : Nil
+      r
+      while size > 0
+        u input_stack
+        STDOUT << ' '
+      end
     end
 
     # &p
@@ -228,18 +234,18 @@ module Ly
 
   class LyStrip
     protected property current_stack : LyStack
-    @strip = Array(LyStack).new 10, LyStack.new
     @strip_pointer = BigInt.new 0
     @functions = {} of Char => String
 
-    def initialize(@input_stack)
-      previous_def
+    def initialize(@flags : Hash(Symbol, Bool | Float64 | Time::Span), @input_stack : LyStack? = nil)
+      @strip = Array(LyStack).new 10, LyStack.new @flags[:debug].as Bool
       @current_stack = @strip[0]
     end
 
     def exec(input : String, input_stack : LyStack? = nil)
       reader = Char::Reader.new input
       reader.each do |char|
+        gets if @flags[:slow]
         begin
           if func = @functions[char]?
             exec_function func, current_stack
@@ -249,109 +255,124 @@ module Ly
           raise FunctionError.new "Error occurred in function #{char}, called at position #{reader.pos}:\n  #{ex.message}"
         end
 
+        debug char, current_stack, input_stack, reader
         # TODO: macros
-        case char
-        when 'i' then current_stack.i input_stack
-        when 'n' then current_stack.n input_stack
-        when 'o' then current_stack.o input_stack
-        when 'u' then current_stack.u input_stack
-        when 'r' then current_stack.r
-        when 'f' then current_stack.f
-        when 'p' then current_stack.p
-        when 'y' then current_stack.y
-        when 'a' then current_stack.a
-        when 'c' then current_stack.c
-        when 's' then current_stack.s
-        when 'l' then current_stack.l
-        when '+' then current_stack.+
-        when '-' then current_stack.-
-        when '/' then current_stack./
-        when '*' then current_stack.*
-        when '~' then current_stack.~
-        when 'N' then current_stack.uN
-        when 'I' then current_stack.uI
-        when 'S' then current_stack.uS
-        when 'J' then current_stack.uJ
-        when 'R' then current_stack.uR
-        when '?' then current_stack.u?
-        when '!' then current_stack.negate
-        when ':' then current_stack.duplicate
-        when '`' then current_stack.backtick
-        when '&'
-          case reader.next_char
-          when '+' then current_stack.stack_plus
-          when 'n' then current_stack.stack_n
-          when 'o' then current_stack.stack_o
-          when 'u' then current_stack.stack_u
-          when 'p' then current_stack.stack_p
-          when ':' then current_stack.stack_dup
-          when 's' then current_stack.stack_s
-          end
-        when '0'..'9' then current_stack.push char.to_i64
-        when '(' # multi-digit numbers
-          current_pos = reader.pos
-          push reader.take_while do |c|
-            c != ')'
-          rescue IndexError
-            raise LyError.new "Unclosed ( at position #{current_pos}"
-          end.join.to_big_i
-        when '>'  then shift :right
-        when '<'  then shift :left
-        when '\'' then current_stack.push reader.next_char.ord
-        when ';' then raise LyStop.new # catches the case where this is called in a loop
-        when '"'
-          current_pos = reader.pos
-          reader.take_while do |c|
-            current_stack.push c.ord
-            c != '"'
-          rescue IndexError
-            raise LyError.new %(Unclosed " at position #{current_pos})
-          end
-        when '['
-          if current_stack.empty? || strip.current_stack[-1] == 0
-            until reader.next_char == ']'
-              next
+        {% begin %}
+          case char
+          {% for io in ['i', 'n', 'o', 'u'] %}
+            when {{io}}
+              {% if io == 'i' || io == 'n' %}
+                next if @flags[:no_input]
+              {% end %}
+              start = @flags[:start].as Time::Span
+              @flags[:start] = start + Time.measure { current_stack.{{io.id}} input_stack }
+          {% end %}
+          {% for c in ['r', 'f', 'p', 'y', 'a', 'c', 's', 'l', '+', '-', '/', '*', '%', '~'] %}
+            when {{c}} then current_stack.{{c.id}}
+          {% end %}
+          {% for c in ['N', 'I', 'S', 'J', 'R', '?'] %}
+            when {{c}} then current_stack.u{{c.id}}
+          {% end %}
+          when '!' then current_stack.negate
+          when ':' then current_stack.duplicate
+          when '`' then current_stack.backtick
+          when '&'
+            debug (char = reader.next_char), current_stack, input_stack, reader
+            case char
+            when ':' then current_stack.stack_dup
+            when '+' then current_stack.stack_plus
+            when 'o' then current_stack.stack_o input_stack
+            when 'u' then current_stack.stack_u input_stack
+            when 'n' then current_stack.stack_n
+            when 'p' then current_stack.stack_p
+            when 's' then current_stack.stack_s
             end
-          end
-        when ']'
-          unless current_stack.empty? || strip.current_stack[-1] == 0
-            until reader.previous_char == '['
-              next
+          when '0'..'9' then current_stack.push char.to_i32
+          when '(' # multi-digit numbers
+            _pos = reader.pos
+            begin
+              reader.next_char
+              to_push = reader.take_while &.!= ')'
+            rescue
+              raise LyError.new "Unclosed ( at position #{_pos}"
             end
-            reader.previous_char # puts pointer back before the loop
-          end
-        when '$'
-          current_pos = reader.pos
-          break_num = current_stack.new_pop implicit: false
-          begin
-            while break_num > 0
+            current_stack.push to_push.join.to_big_i
+          when '>'  then shift :right
+          when '<'  then shift :left
+          when '\'' then current_stack.push reader.next_char.ord
+          when ';'  then raise LyStop.new
+          when '"'
+            _pos = reader.pos
+            reader.next_char
+            reader.take_while do |c|
+              break if c == '"'
+              current_stack.push c.ord
+            rescue IndexError
+              raise LyError.new %(Unclosed " at position #{_pos})
+            end
+          when '['
+            if current_stack.empty? || current_stack.last == 0
+              extra = 0
+              loop do
+                case reader.next_char
+                when '[' then extra += 1
+                when ']'
+                  if extra == 0
+                    break
+                  end
+                  extra -= 1
+                end
+              end
+            end
+          when ']'
+            unless current_stack.empty? || current_stack.last == 0
+              extra = 0
+              loop do
+                case reader.previous_char
+                when ']' then extra += 1
+                when '['
+                  if extra == 0
+                    break
+                  end
+                  extra -= 1
+                end
+              end
+            end
+          when '$'
+            current_pos = reader.pos
+            (current_stack.new_pop implicit: false).times do |i|
               until reader.next_char == ']'
                 next
               end
-            end
-          rescue IndexError
-            raise LyError.new "$ at position #{current_pos} breaks too many loops (#{break_num})"
-          end
-        else
-          if reader.peek_next_char == '{'
-            current_pos = reader.pos
-            functions[char] = reader.take_while do |c|
-              c != '}'
             rescue IndexError
-              raise LyError.new "Unclosed { at position #{current_pos}"
-            end.join
+              raise LyError.new "$ at position #{current_pos} breaks too many loops (#{i})"
+            end
           else
-            raise LyError.new "#{char} at position #{reader.pos} is undefined"
+            if reader.peek_next_char == '{'
+              current_pos = reader.pos
+              @functions[char] = reader.take_while do |c|
+                c != '}'
+              rescue IndexError
+                raise LyError.new "Unclosed { at position #{current_pos}"
+              end.join
+            else
+              raise LyError.new "#{char} at position #{reader.pos} is undefined"
+            end
           end
-        end
+        {% end %}
+        sleep @flags[:time].as Float64
       end
-      # implicit output
-      current_stack.stack_u
+      puts "Implicit output: " if @flags[:debug]
+      current_stack.stack_u nil
+    end
+
+    def debug(char, stack : LyStack, input, reader : Char::Reader)
+      puts "#{char} | #{stack.map &.to_i} | #{LyStack.backup_cell.map &.to_i} | #{input ? "function" : "main"} | #{reader.pos} | #{@strip_pointer}" if @flags[:debug]
     end
 
     def exec_function(input : String, outer : LyStack)
       LyStack.implicit = false
-      exec input, outer
+      LyStrip.new(@flags).exec input, outer
     rescue LyStop # each function is its own program
       LyStack.implicit = true
       # All other exceptions are fatal
@@ -360,23 +381,27 @@ module Ly
     private def shift(direction : Symbol)
       if direction == :right
         @strip_pointer += 1
-        @strip << LyStack.new if @strip_pointer > @strip.size
+        @strip << LyStack.new @flags[:debug].as Bool if @strip_pointer > @strip.size
       elsif direction == :left
         if @strip_pointer > 0
           @strip_pointer -= 1
         else
-          @strip.unshift LyStack.new
+          @strip.unshift LyStack.new @flags[:debug].as Bool
         end
       end
       @current_stack = @strip[@strip_pointer]
     end
   end
 
-  def execute(inp : String)
-    LyStrip.exec(input)
+  def execute(input, flags)
+    flags[:start] = Time.monotonic if flags[:timeit]
+    LyStrip.new(flags).exec input
   rescue LyStop
+    if flags[:timeit] && (start = flags[:start]).is_a? Time::Span
+      puts "Time to execute (seconds): #{(Time.monotonic - start).total_seconds}"
+    end
   rescue ex
-    puts ex.message
+    puts "#{ex.class}: #{ex}"
   end
 
   class LyError < Exception
@@ -395,5 +420,38 @@ module Ly
   end
 
   class LyStop < LyError
+  end
+end
+
+flags = Hash(Symbol, Bool | Float64 | Time::Span).new false
+flags[:time] = 0_f64
+flags[:start] = Time::Span.new(nanoseconds: 0)
+input = uninitialized String
+
+OptionParser.parse! do |parser|
+  parser.banner = "Usage: ly_crystal filename [-d] [-s] [-ti] [-ni] [-t=]"
+  parser.on("-d", "--debug", "Output additional debug information") { flags[:debug] = true }
+  parser.on("-s", "--slow", "Go through the program step-by-step") { flags[:slow] = true }
+  parser.on("-ti", "--timeit", "Display total execution time") { flags[:timeit] = true }
+  parser.on("-ni", "--no-input", "Never prompt for input") { flags[:no_input] = true }
+  parser.on("-h", "--help", "Shows this help") { puts parser }
+
+  parser.on("-t TIME", "--time=TIME", "Time to wait between each execution tick") do |t|
+    flags[:time] = t.to_f
+  rescue ArgumentError
+    puts "#{t} is not convertable to Float64"
+  end
+
+  # NOTE: isn't even implemented in ly.py
+  # parser.on("-i", "--input", "Input for the program. If not given, you will be prompted") { something }
+
+  parser.invalid_option do |flag|
+    STDERR.puts "Error: #{flag} is not a valid option"
+    STDERR.puts parser
+    exit(1)
+  end
+
+  parser.unknown_args &.first.try do |input|
+    Ly.execute((File.file?(input) ? File.read_lines(input).first : input), flags)
   end
 end
