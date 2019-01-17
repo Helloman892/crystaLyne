@@ -255,7 +255,7 @@ module Ly
           raise FunctionError.new "Error occurred in function #{char}, called at position #{reader.pos}:\n  #{ex.message}"
         end
 
-        debug char, current_stack, input_stack, reader
+        debug char, input_stack, reader
 
         {% begin %}
           case char
@@ -264,8 +264,8 @@ module Ly
               {% if io == 'i' || io == 'n' %}
                 next if @flags[:no_input]
               {% end %}
-              start = @flags[:start].as Time::Span
-              @flags[:start] = start + Time.measure { current_stack.{{io.id}} input_stack }
+              @flags[:start] = @flags[:start].as(Time::Span) + Time.measure { current_stack.{{io.id}} input_stack }
+              STDOUT.flush
           {% end %}
           {% for c in ['r', 'f', 'p', 'y', 'a', 'c', 's', 'l', '+', '-', '/', '*', '%', '~'] %}
             when {{c}} then current_stack.{{c.id}}
@@ -277,7 +277,7 @@ module Ly
           when ':' then current_stack.duplicate
           when '`' then current_stack.backtick
           when '&'
-            debug (char = reader.next_char), current_stack, input_stack, reader
+            debug (char = reader.next_char), input_stack, reader
             case char
             when ':' then current_stack.stack_dup
             when '+' then current_stack.stack_plus
@@ -299,7 +299,7 @@ module Ly
           when '>'  then shift :right
           when '<'  then shift :left
           when '\'' then current_stack.push reader.next_char.ord
-          when ';'  then raise LyStop.new
+          when ';'  then return
           when '"'
             _pos = reader.pos
             begin
@@ -314,8 +314,9 @@ module Ly
           when '['
             if current_stack.empty? || current_stack.last == 0
               extra = 0
+              c = uninitialized Char
               loop do
-                case reader.next_char
+                case c = reader.next_char
                 when '[' then extra += 1
                 when ']'
                   if extra == 0
@@ -324,6 +325,7 @@ module Ly
                   extra -= 1
                 end
               end
+              debug c, input_stack, reader
             end
           when ']'
             unless current_stack.empty? || current_stack.last == 0
@@ -361,22 +363,20 @@ module Ly
             end
           end
         {% end %}
-        sleep @flags[:time].as Float64
+        sleep @flags[:time].as Float64 if @flags[:time]
       end
       puts "Implicit output: " if @flags[:debug]
       current_stack.stack_u nil
     end
 
-    def debug(char, stack : LyStack, input, reader : Char::Reader)
-      puts "#{char} | #{stack.map &.to_i} | #{LyStack.backup_cell.map &.to_i} | #{input ? "function" : "main"} | #{reader.pos} | #{@strip_pointer}" if @flags[:debug]
+    def debug(char, input, reader : Char::Reader)
+      puts "#{char} | #{current_stack.map &.to_i} | #{LyStack.backup_cell.map &.to_i} | #{input ? "function" : "main"} | #{reader.pos} | #{@strip_pointer}" if @flags[:debug]
     end
 
     def exec_function(input : String, outer : LyStack)
       LyStack.implicit = false
       LyStrip.new(@flags).exec input, outer
-    rescue LyStop # each function is its own program
       LyStack.implicit = true
-      # All other exceptions are fatal
     end
 
     private def shift(direction : Symbol)
@@ -395,14 +395,9 @@ module Ly
   end
 
   def execute(input, flags)
-    flags[:start] = Time.monotonic if flags[:timeit]
+    flags[:start] = Time.monotonic
     LyStrip.new(flags).exec input
-  rescue LyStop
-    if flags[:timeit] && (start = flags[:start]).is_a? Time::Span
-      puts "Time to execute (seconds): #{(Time.monotonic - start).total_seconds}"
-    end
-  rescue ex
-    puts "#{ex.class}: #{ex}"
+    Time.monotonic - flags[:start].as Time::Span
   end
 
   class LyError < Exception
@@ -419,40 +414,45 @@ module Ly
 
   class FunctionError < LyError
   end
-
-  class LyStop < LyError
-  end
 end
 
 flags = Hash(Symbol, Bool | Float64 | Time::Span).new false
-flags[:time] = 0_f64
 flags[:start] = Time::Span.new(nanoseconds: 0)
+benchmark = 1
 input = uninitialized String
 
 OptionParser.parse! do |parser|
-  parser.banner = "Usage: ly_crystal filename [-d] [-s] [-ti] [-ni] [-t=]"
+  parser.banner = "Usage: ly_crystal filename [-d] [-s] [-ti] [-ni] [-t=0.0] [-b=0]\nNOTE: `filename` may also be passed as a delimited string representing the program"
   parser.on("-d", "--debug", "Output additional debug information") { flags[:debug] = true }
   parser.on("-s", "--slow", "Go through the program step-by-step") { flags[:slow] = true }
   parser.on("-ti", "--timeit", "Display total execution time") { flags[:timeit] = true }
   parser.on("-ni", "--no-input", "Never prompt for input") { flags[:no_input] = true }
-  parser.on("-h", "--help", "Shows this help") { puts parser }
 
-  parser.on("-t TIME", "--time=TIME", "Time to wait between each execution tick") do |t|
-    flags[:time] = t.to_f
+  parser.on("-t TIME", "--time=TIME", "Time to wait between each execution tick (default 0.0 seconds)") do |t|
+    flags[:time] = t.to_f64
   rescue ArgumentError
     puts "#{t} is not convertable to Float64"
   end
 
-  # NOTE: isn't even implemented in ly.py
-  # parser.on("-i", "--input", "Input for the program. If not given, you will be prompted") { something }
+  parser.on("-b N", "--benchmark=N", "Run the program N times and return the average execution time (default 1)") do |n|
+    flags[:timeit] = true
+    benchmark = n.to_i
+  rescue ArgumentError
+    puts "#{n} is not convertable to Int32"
+  end
+
+  parser.on("-h", "--help", "Shows this help") { puts parser }
 
   parser.invalid_option do |flag|
     STDERR.puts "Error: #{flag} is not a valid option"
     STDERR.puts parser
-    exit(1)
   end
 
-  parser.unknown_args &.first.try do |input|
-    Ly.execute((File.file?(input) ? File.read_lines(input).first : input), flags)
+  parser.unknown_args do |arr|
+    arr.first?.try do |input|
+      total = Array.new(benchmark, Ly.execute((File.file?(input) ? File.read_lines(input).first : input), flags)).sum
+      puts "Time to execute (seconds): #{total.total_seconds / benchmark}" if flags[:timeit]
+    end
+    puts parser if !arr.first
   end
 end
