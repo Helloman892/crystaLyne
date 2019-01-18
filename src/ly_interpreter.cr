@@ -61,6 +61,10 @@ module Ly
       reverse!
     end
 
+    def w : Nil
+      sleep new_pop
+    end
+
     # !
     def negate : Nil
       push (new_pop == 0).to_unsafe
@@ -101,8 +105,8 @@ module Ly
       _output(input_stack) { |temp| STDOUT << temp.to_s.to_i64.chr }
     end
 
-    def u(input_stack) : Nil
-      _output(input_stack) { |temp| STDOUT << temp }
+    def u(input_stack, s = false) : Nil
+      _output(input_stack) { |temp| STDOUT << temp; STDOUT << ' ' if s }
     end
 
     private def _output(input_stack, &block)
@@ -211,8 +215,7 @@ module Ly
     def stack_u(input_stack) : Nil
       r
       while size > 0
-        u input_stack
-        STDOUT << ' '
+        u input_stack, s: true
       end
     end
 
@@ -261,16 +264,13 @@ module Ly
           case char
           {% for io in ['i', 'n', 'o', 'u'] %}
             when {{io}}
-              {% if io == 'i' || io == 'n' %}
-                next if @flags[:no_input]
-              {% end %}
               @flags[:start] = @flags[:start].as(Time::Span) + Time.measure { current_stack.{{io.id}} input_stack }
               STDOUT.flush
           {% end %}
-          {% for c in ['r', 'f', 'p', 'y', 'a', 'c', 's', 'l', '+', '-', '/', '*', '%', '~'] %}
+          {% for c in ['r', 'f', 'p', 'y', 'a', 'c', 's', 'l', 'w', '+', '-', '/', '*', '%', '~'] %}
             when {{c}} then current_stack.{{c.id}}
           {% end %}
-          {% for c in ['N', 'I', 'S', 'J', 'R', '?'] %}
+          {% for c in ['N', 'I', 'S', 'J', 'R', 'W', '?'] %}
             when {{c}} then current_stack.u{{c.id}}
           {% end %}
           when '!' then current_stack.negate
@@ -395,6 +395,8 @@ module Ly
   end
 
   def execute(input, flags)
+    # strips comments before starting timing
+    input = input.gsub /(#[\w\h]+)|\v/m, ""
     flags[:start] = Time.monotonic
     LyStrip.new(flags).exec input
     Time.monotonic - flags[:start].as Time::Span
@@ -422,11 +424,10 @@ benchmark = 1
 input = uninitialized String
 
 OptionParser.parse! do |parser|
-  parser.banner = "Usage: ly_crystal filename [-d] [-s] [-ti] [-ni] [-t=0.0] [-b=0]\nNOTE: `filename` may also be passed as a delimited string representing the program"
+  parser.banner = "Usage: ly_crystal filename [-d] [-s] [-ti] [-t=0.0] [-b=0]\nNOTE: `filename` may also be passed as a delimited string representing the program"
   parser.on("-d", "--debug", "Output additional debug information") { flags[:debug] = true }
   parser.on("-s", "--slow", "Go through the program step-by-step") { flags[:slow] = true }
   parser.on("-ti", "--timeit", "Display total execution time") { flags[:timeit] = true }
-  parser.on("-ni", "--no-input", "Never prompt for input") { flags[:no_input] = true }
 
   parser.on("-t TIME", "--time=TIME", "Time to wait between each execution tick (default 0.0 seconds)") do |t|
     flags[:time] = t.to_f64
@@ -450,9 +451,11 @@ OptionParser.parse! do |parser|
 
   parser.unknown_args do |arr|
     arr.first?.try do |input|
-      total = Array.new(benchmark, Ly.execute((File.file?(input) ? File.read_lines(input).first : input), flags)).sum
-      puts "Time to execute (seconds): #{total.total_seconds / benchmark}" if flags[:timeit]
+      total = Array(Time::Span).new
+      benchmark.times { total << Ly.execute((File.file?(input) ? File.read input : input), flags) }
+      puts "Time to execute (seconds): #{total.sum.total_seconds / benchmark}" if flags[:timeit]
     end
     puts parser if !arr.first
   end
 end
+puts

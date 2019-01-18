@@ -1,2 +1,2 @@
 #!/bin/bash
-crystal build src/ly_interpreter.cr -o ly_crystal
+crystal build src/ly_interpreter.cr -o ly_crystal --release
