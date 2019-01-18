@@ -453,9 +453,8 @@ OptionParser.parse! do |parser|
     arr.first?.try do |input|
       total = Array(Time::Span).new
       benchmark.times { total << Ly.execute((File.file?(input) ? File.read input : input), flags) }
-      puts "Time to execute (seconds): #{total.sum.total_seconds / benchmark}" if flags[:timeit]
+      puts "\nTime to execute (seconds): #{total.sum.total_seconds / benchmark}" if flags[:timeit]
     end
     puts parser if !arr.first
   end
 end
-puts
