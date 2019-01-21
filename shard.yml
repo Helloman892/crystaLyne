@@ -14,5 +14,7 @@ dependencies:
   spec2:
     github: waterlink/spec2.cr
     version: ~> 0.9
+  stdio:
+    github: mosop/stdio
 
 license: MIT
