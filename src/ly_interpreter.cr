@@ -7,7 +7,7 @@ benchmark = 1
 input = uninitialized String
 
 OptionParser.parse! do |parser|
-  parser.banner = "Usage: ly_crystal filename [-d] [-s] [-ti] [-t=0.0] [-b=0]\nNOTE: `filename` may also be passed as a delimited string representing the program"
+  parser.banner = "Usage: crystalyne <filename> [-d] [-s] [-ti] [-t=0.0] [-b=1]\nNOTE: <filename> may also be passed as a delimited string representing the program"
   parser.on("-d", "--debug", "Output additional debug information") { flags[:debug] = true }
   parser.on("-s", "--slow", "Go through the program step-by-step") { flags[:slow] = true }
   parser.on("-ti", "--timeit", "Display total execution time") { flags[:timeit] = true }
