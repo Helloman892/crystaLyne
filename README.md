@@ -12,7 +12,7 @@ Under Windows... it's probably best not to try, but it *is* possible to cross-co
 
 ## Usage
 
-```crystal
+```
 crystalyne <filename> [-d] [-s] [-ti] [-t=0.0] [-b=0]
 Note that `filename` may instead be a appropriately delimited string representing the Ly program to run
 
