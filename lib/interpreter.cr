@@ -83,7 +83,7 @@ module Ly
     end
 
     def w : Nil
-      sleep new_pop
+      sleep new_pop.to_i
     end
 
     def uW : Nil
