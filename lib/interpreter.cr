@@ -289,9 +289,9 @@ module Ly
             when '+' then current_stack.stack_plus
             when 'o' then current_stack.stack_o input_stack
             when 'u' then current_stack.stack_u input_stack
-            {% for c in ['n', 'p', 's'] %}
-              when {{c}} then current_stack.stack_{{c.id}}
-            {% end %}
+              {% for c in ['n', 'p', 's'] %}
+                when {{c}} then current_stack.stack_{{c.id}}
+              {% end %}
             end
           when '0'..'9' then current_stack.push char.to_i32
           when '(' # multi-digit numbers
@@ -319,54 +319,64 @@ module Ly
             end
           when '['
             if current_stack.empty? || current_stack.last == 0
+              _pos = reader.pos
               extra = 0
+              c = uninitialized Char
               loop do
                 case c = reader.next_char
                 when '[' then extra += 1
                 when ']'
-                  if extra == 0
-                    break
-                  end
+                  break if extra == 0
                   extra -= 1
                 end
+              rescue IndexError
+                raise LyError.new "Unclosed [ at position #{_pos}"
               end
               debug c, input_stack, reader
+            else # i.e. start the loop
+              @loop_start_positions.push reader.pos
             end
           when ']'
-            unless current_stack.empty? || current_stack.last == 0
-              extra = 0
-              loop do
-                case reader.previous_char
-                when ']' then extra += 1
-                when '['
-                  if extra == 0
-                    break
-                  end
-                  extra -= 1
-                end
-              end
-            end
-          when '$'
-            current_pos = reader.pos
-            (k = current_stack.new_pop implicit: false).times do |i|
-              until (c = reader.next_char) == ']'
-                k += 1 if c != '['
-                next
+            _pos = reader.pos
+            begin
+              if current_stack.empty? || current_stack.last == 0
+                @loop_start_positions.pop # i.e. end the loop
+              else
+                reader.pos = @loop_start_positions.last
               end
             rescue IndexError
-              raise LyError.new "$ at position #{current_pos} breaks too many loops (#{k - i})"
+              raise LyError.new "] at position #{_pos} has no corresponding ["
             end
+          when '$'
+            begin
+              _loops = loops = current_stack.new_pop
+              _pos = reader.pos
+              until loops == 0
+                c = reader.next_char
+                case c
+                when '['
+                  loops += 1
+                when ']'
+                  loops -= 1
+                end
+              end
+              _loops.times { @loop_start_positions.pop }
+            rescue IndexError
+              raise LyError.new "$ at position #{_pos} breaks too many loops (#{loops})"
+            end
+          when '{', '}'
+            raise LyError.new "Function block at position #{reader.pos} has no name"
           else
             begin
               if reader.next_char == '{'
-                current_pos = reader.pos
-                reader.next_char
-                blocks = 1
+                _pos = reader.pos
+                reader.pos += 1
+                blocks = 1 # allows function definition within functions
                 @functions[char] = reader.take_while do |c|
                   blocks += 1 if c == '{'
                   c != '}' || (blocks -= 1) > 0
                 rescue IndexError
-                  raise LyError.new "Unclosed { at position #{current_pos}"
+                  raise LyError.new "Unclosed { at position #{_pos}"
                 end.join
               else
                 raise IndexError.new
@@ -412,6 +422,9 @@ module Ly
     input = input.gsub /(#[\w\h]+)|\v/m, ""
     flags[:start] = Time.monotonic
     LyStrip.new(flags).exec input
+    Time.monotonic - flags[:start].as Time::Span
+  rescue ex : LyError
+    puts "#{ex.class.to_s.lchop "Ly::"}: #{ex.message}"
     Time.monotonic - flags[:start].as Time::Span
   end
 
