@@ -1,8 +1,6 @@
 # crystaLyne
 
-Formally, this is an (almost) LL(1) parser hooked up to an interpreter for the esolang [Ly](https://github.com/LyricLy/Ly) ([see also](https://esolangs.org/wiki/Ly)), the full (read: comprehensive) documentation of which I have yet to write.
-
-For those interested, the reason it isn't truly LL(1) is due to the existance of arbitrary-length strings and integers, making this technically LL(\*).
+Formally, this is an LL parser (with lookahead I can't be bothered to calculate) hooked up to an interpreter for the esolang [Ly](https://github.com/LyricLy/Ly) ([see also](https://esolangs.org/wiki/Ly)), the full (read: comprehensive) documentation of which I have yet to write.
 
 ## Compilation
 
